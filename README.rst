@@ -18,7 +18,14 @@ Introduction
     :target: https://github.com/psf/black
     :alt: Code Style: Black
 
-A CircuitPython driver class for the NAU7802 24-bit ADC.
+An async CircuitPython driver class for the NAU7802 24-bit ADC.  This is a fork of the original
+`NAU7802 driver <https://github.com/adafruit/CircuitPython_NAU7802>`_ that converts certain operations into
+async methods.  This allows the driver to play nice with other async code especially if you're doing potentially long
+running operations such as reading and averaging dozens of samples.  The original driver blocks all code execution
+while waiting for data to become available while this one will yield (a zero async sleep) to allow other code to run.
+
+Since checking the availability of and reading data from the load cell is already non-blocking this is mostly useful for
+enabling non-blocking initialization, but also serves as a good example of how to read data in an async friendly way.
 
 
 Dependencies
@@ -28,6 +35,7 @@ This driver depends on:
 * `Adafruit CircuitPython <https://github.com/adafruit/circuitpython>`_
 * `Bus Device <https://github.com/adafruit/Adafruit_CircuitPython_BusDevice>`_
 * `Register <https://github.com/adafruit/Adafruit_CircuitPython_Register>`_
+* `Asyncio <https://github.com/adafruit/Adafruit_CircuitPython_asyncio>`_
 
 Please ensure all dependencies are available on the CircuitPython filesystem.
 This is easily achieved by downloading
@@ -50,7 +58,7 @@ following command to install:
 
 .. code-block:: shell
 
-    circup install cedargrove_nau7802
+    circup install cedargrove_nau7802_async
 
 Or the following command to update an existing version:
 
@@ -63,11 +71,12 @@ Usage Example
 
 .. code-block:: py
 
+    import asyncio
     import board
-    from cedargrove_nau7802 import NAU7802
+    from cedargrove_nau7802_async import NAU7802
 
     # Instantiate NAU7802 ADC
-    nau7802 = NAU7802(board.I2C(), address=0x2A, active_channels=2)
+    nau7802 = await NAU7802.create_async(board.I2C(), address=0x2A, active_channels=2)
 
 ``nau7802_simpletest.py`` and other examples can be found in the ``examples`` folder.
 

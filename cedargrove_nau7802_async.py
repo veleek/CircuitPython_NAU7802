@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-`cedargrove_nau7802`
+`cedargrove_nau7802_async`
 ================================================================================
 
 A CircuitPython driver class for the NAU7802 24-bit ADC. Supports dual analog
@@ -35,6 +35,7 @@ Implementation Notes
 
 import time
 import struct
+import asyncio
 
 from adafruit_bus_device.i2c_device import I2CDevice
 from adafruit_register.i2c_struct import ROUnaryStruct
@@ -46,7 +47,7 @@ from adafruit_register.i2c_bit import RWBit
 from adafruit_register.i2c_bit import ROBit
 
 __version__ = "0.0.0+auto.0"
-__repo__ = "https://github.com/CedarGroveStudios/CircuitPython_NAU7802.git"
+__repo__ = "https://github.com/veleek/CircuitPython_NAU7802_Async.git"
 
 # DEVICE REGISTER MAP
 _PU_CTRL = 0x00  # Power-Up Control RW
@@ -107,29 +108,45 @@ class NAU7802:
     """The primary NAU7802 class."""
 
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, i2c_bus, address=0x2A, active_channels=1):
+    @staticmethod
+    async def create_async(i2c_bus, address=0x2A, active_channels=1):
         """Instantiate NAU7802; LDO 3v0 volts, gain 128, 10 samples per second
         conversion rate, disabled ADC chopper clock, low ESR caps, and PGA output
         stabilizer cap if in single channel mode."""
+        self = NAU7802(i2c_bus, address, active_channels)
+        await self.init_async()
+
+        return self
+
+    def __init__(self, i2c_bus, address, active_channels):
         self.i2c_device = I2CDevice(i2c_bus, address)
-        if not self.reset():
+        self._act_channels = active_channels
+
+        self._enable = False
+        self._pu_start = False
+        self._calib_mode = None  # Initialize for later use
+        self._adc_out = None  # Initialize for later use
+
+    async def init_async(self):
+        """Initialize NAU7802 device.  The reset and enable methods both have long
+        running waits in them so we want to do them asynchronously."""
+        if not await self.reset_async():
             raise RuntimeError("NAU7802 device could not be reset")
-        if not self.enable(True):
+        if not await self.enable_async(True):
             raise RuntimeError("NAU7802 device could not be enabled")
+
         self.ldo_voltage = "3V0"  # 3.0-volt internal analog power (AVDD)
         self._pu_ldo_source = True  # Internal analog power (AVDD)
         self.gain = 128  # X128
         self._c2_conv_rate = ConversionRate.RATE_10SPS  # 10SPS default
         self._adc_chop_clock = 0x3  # 0x3 = Disable ADC chopper clock
         self._pga_ldo_mode = 0x0  # 0x0 = Use low ESR capacitors
-        self._act_channels = active_channels
+
         # 0x1 = Enable PGA out stabilizer cap for single channel use
         self._pc_cap_enable = 0x1
         if self._act_channels == 2:
             # 0x0 = Disable PGA out stabilizer cap for dual channel use
             self._pc_cap_enable = 0x0
-        self._calib_mode = None  # Initialize for later use
-        self._adc_out = None  # Initialize for later use
 
     # DEFINE I2C DEVICE BITS, NYBBLES, BYTES, AND REGISTERS
     # Chip Revision  R-
@@ -253,7 +270,7 @@ class NAU7802:
         elif self._gain == 128:
             self._c1_gains = Gain.GAIN_X128
 
-    def enable(self, power=True):
+    async def enable_async(self, power=True):
         """Enable(start) or disable(stop) the internal analog and digital
         systems power. Enable = True; Disable (low power) = False. Returns
         True when enabled; False when disabled."""
@@ -261,12 +278,12 @@ class NAU7802:
         if self._enable:
             self._pu_analog = True
             self._pu_digital = True
-            time.sleep(0.750)  # Wait 750ms; minimum 400ms
+            await asyncio.sleep(0.750)  # Wait 750ms; minimum 400ms
             self._pu_start = True  # Start acquisition system cycling
             return self._pu_ready
         self._pu_analog = False
         self._pu_digital = False
-        time.sleep(0.010)  # Wait 10ms (200us minimum)
+        await asyncio.sleep(0.010)  # Wait 10ms (200us minimum)
         return False
 
     def available(self):
@@ -286,21 +303,42 @@ class NAU7802:
         self._adc_out = value / 128  # Restore to 24-bit signed integer value
         return self._adc_out
 
-    def reset(self):
+    async def read_async(self, samples=2):
+        """Read and average consecutive raw sample values. Return average raw value."""
+        sample_sum = 0
+        sample_count = samples
+        while sample_count > 0:
+            while not self.available():
+                await asyncio.sleep(0)
+            sample_sum = sample_sum + self.read()
+            sample_count -= 1
+        return int(sample_sum / samples)
+
+    async def read_values_async(self, samples=2):
+        """Read consecutive raw sample values. Return the set of raw value."""
+        samples = []
+        sample_count = samples
+        while sample_count > 0:
+            while not self.available():
+                await asyncio.sleep(0)
+            samples.append(self.read())
+        return samples
+
+    async def reset_async(self):
         """Resets all device registers and enables digital system power.
         Returns the power ready status bit value: True when system is ready;
         False when system not ready for use."""
         self._pu_reg_reset = True  # Reset all registers
-        time.sleep(0.100)  # Wait 100ms; 10ms minimum
+        await asyncio.sleep(0.100)  # Wait 100ms; 10ms minimum
         self._pu_reg_reset = False
         self._pu_digital = True
-        time.sleep(0.750)  # Wait 750ms; 400ms minimum
+        await asyncio.sleep(0.750)  # Wait 750ms; 400ms minimum
         return self._pu_ready
 
-    def calibrate(self, mode="INTERNAL"):
+    async def calibrate_async(self, mode="INTERNAL"):
         """Perform the calibration procedure. Valid calibration modes
         are 'INTERNAL', 'OFFSET', and 'GAIN'. True if successful."""
-        if not mode in dir(CalibrationMode):
+        if mode not in dir(CalibrationMode):
             raise ValueError("Invalid Calibration Mode")
         self._calib_mode = mode
         if self._calib_mode == "INTERNAL":  # Internal PGA offset (zero setting)
@@ -311,5 +349,5 @@ class NAU7802:
             self._c2_cal_mode = CalibrationMode.GAIN
         self._c2_cal_start = True
         while self._c2_cal_start:
-            time.sleep(0.010)  # 10ms
+            await asyncio.sleep(0.010)  # 10ms
         return not self._c2_cal_error
