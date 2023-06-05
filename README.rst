@@ -18,8 +18,8 @@ Introduction
     :target: https://github.com/psf/black
     :alt: Code Style: Black
 
-A async CircuitPython driver class for the NAU7802 24-bit ADC.  This is a fork of the original
-`NAU7802 driver <https://github.com/CedarGroveStudios/CircuitPython_NAU7802>` that converts certain operations into
+An async CircuitPython driver class for the NAU7802 24-bit ADC.  This is a fork of the original
+`NAU7802 driver <https://github.com/adafruit/CircuitPython_NAU7802>` that converts certain operations into
 async methods.  This allows the driver to play nice with other async code especially if you're doing potentially long
 running operations such as reading and averaging dozens of samples.  The original driver blocks all code execution
 while waiting for data to become available while this one will yield (a zero async sleep) to allow other code to run.
